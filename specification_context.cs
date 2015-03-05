@@ -1,128 +1,9 @@
-    /*
-    How to use the specification runner for unit tests with NUnit:
-    ==============================================
-    1. Create an abstract class called "specifications"
-    2. Decorate the class with the [TestFixture] attribute
-    3. Create a public void method called "execute"
-    4. Decorate the method with the [Test] attribute
-    5. Make the new "specification" class inherit from specification_context
-    6. Inside of the "execute" method, call the base class method "execute_context"
-     
-     Ex: 
-     
-     [TestFixture]
-     public class specification : specification_context
-     {  
-        [Test]
-        public void execute()
-        {
-            execute_context()
-        }
-     }
-
-     How to use the specification runner for unit tests with xUnit:
-    ==============================================
-    1. Create an abstract class called "specifications"
-    2. Create a public void method called "execute"
-    3. Decorate the method with the [Fact] attribute
-    4. Make the new "specification" class inherit from specification_context
-    5. Inside of the "execute" method, call the base class method "execute_context"
-     
-     Ex: 
-     
-     public class specification : specification_context
-     {  
-        [Fact]
-        public void execute()
-        {
-            execute_context()
-        }
-     }
-     
-     
-    // subject under test:
-    public class Calculator
-    {
-        public int Add(int first, int second)
-        {
-            return first + second;
-        }
-
-        public decimal Divide(decimal first, int second)
-        {
-            return first/second;
-        }
-    }
-
-    This is the specifications class, it will have methods describing particular scenarios or examples 
-    for inspection along with test conditions for one particular scenario or "subject":
-	
-    public class calculator_specifications : specification
-    {
-        private Calculator _calculator;
-
-        // This is a concern around addition, all tests should go 
-        // here for anything regarding addition for the calculator
-        public void when_adding_two_non_negative_numbers()
-        {
-            var result = 0;
-
-            establish = () => _calculator = new Calculator();
-
-            because = () =>
-            {
-                result = _calculator.Add(1, 2);
-            };
-
-            it["should return the results as a positive number"] = () =>
-            {
-                Assert.AreEqual(3, result);
-                Assert.True(result > 0);
-            };
-        }
-
-        // This is a concern around division, all tests should go 
-        // here for anything regarding division for the calculator
-        public void when_dividing_two_positive_numbers()
-        {
-            var result = decimal.Zero;
-
-            establish = () => _calculator = new Calculator();
-
-            // this is one test
-            it["should throw a divide by zero exception when the denominator is zero"] = () =>
-                Assert.Throws<DivideByZeroException>(() => _calculator.Divide(1, 0));
-
-            // and another can be put here...
-            it["should return a positive number when the numerator is greater than the denominator"] = () =>
-            {
-                result = _calculator.Divide(4, 2);
-                Assert.AreEqual(2, result);
-                Assert.True(result > 0);
-            };
-
-            // and one more can be here...
-        }
-    }
-	
-    Output:
-	
-    calculator specifications
-        when adding two non negative numbers
-            it should return the results as a positive number : passed
-
-        when dividing two positive numbers
-            it should throw a divide by zero exception when the denominator is zero : passed
-            it should return a positive number when the numerator is greater than the denominator : passed
-	
-    */
-
     using System;
     using System.Collections.Generic;
     using System.Reflection;
     using System.Text;
     using System.Linq;
-	
+
     /// <summary>
     /// Represents a top-level class that holds all of the specifications for a given concern.
     /// </summary>
@@ -143,6 +24,7 @@
     public class test_example
     {
         public string Name { get; set; }
+        public test_condition ExampleMethodAsTestCondition { get; set; }
         public List<test_condition> Conditions { get; set; }
         public List<Action> PreConditions { get; set; }
         public List<Action> PostConditions { get; set; }
@@ -156,40 +38,60 @@
 
         public void execute(StringBuilder verbalizer)
         {
-            verbalizer.AppendFormat("\t{0}", specification_context.normalize(Name)).AppendLine();
-
             PreConditions.ForEach(condition => condition());
 
-            foreach ( var condition in Conditions )
+            if ( ExampleMethodAsTestCondition != null )
             {
-                string message = string.Empty;
+                examine_for_pass_or_failure(ExampleMethodAsTestCondition, verbalizer, 1);
+            }
+            else
+            {
+                var statement = specification_context.normalize(Name);
+                verbalizer.AppendFormat("\t{0}", statement).AppendLine();
 
-                if ( condition.Action == specification_context.todo )
+                foreach ( var condition in Conditions )
                 {
-                    message = string.Format("{0} : pending", condition);
-                    verbalizer.AppendFormat("\t\t{0}", message).AppendLine();
-                    continue;
-                }
-
-                try
-                {
-                    message = string.Format("{0} : passed", condition);
-                    condition.Action();
-                }
-                catch ( Exception testConditionFailureException )
-                {
-                    message = string.Format("{0} : failed", condition);
-                    condition.Failed(testConditionFailureException);
-                }
-                finally
-                {
-                    verbalizer.AppendFormat("\t\t{0}", message).AppendLine();
+                    examine_for_pass_or_failure(condition, verbalizer);
                 }
             }
 
-            verbalizer.AppendLine();
-
             PostConditions.ForEach(condition => condition());
+        }
+
+        private void examine_for_pass_or_failure(
+            test_condition condition,
+            StringBuilder verbalizer,
+            int indentLevel = 2)
+        {
+            string message = string.Empty;
+            string indent = string.Empty; 
+
+            Enumerable.Range(1, indentLevel)
+                .ToList()
+                .ForEach(i => indent += "\t");
+                
+
+            if ( condition.Action == specification_context.todo )
+            {
+                message = string.Format("{0} : pending", condition);
+                verbalizer.AppendFormat("{0}{1}", indent, message).AppendLine();
+                return;
+            }
+
+            try
+            {
+                message = string.Format("{0} : passed", condition);
+                condition.Action();
+            }
+            catch ( Exception testConditionFailureException )
+            {
+                message = string.Format("{0} : failed", condition);
+                condition.Failed(testConditionFailureException);
+            }
+            finally
+            {
+                verbalizer.AppendFormat("{0}{1}", indent, message).AppendLine();
+            }
         }
     }
 
@@ -219,7 +121,7 @@
         public override string ToString()
         {
             var builder = new StringBuilder();
-            builder.AppendFormat("it {0}", Name);
+            builder.AppendFormat("{0}", Name);
             return builder.ToString();
         }
     }
@@ -233,20 +135,22 @@
 
         private readonly IEnumerable<string> SetupMethodsPrefixes = new List<string>
         {
-            "before_each",
+            "before_",
             "given_"
         };
 
         private readonly IEnumerable<string> TeardownMethodPrefixes = new List<string>
         {
-            "after_each"
+            "after_", 
+            "finally_"
         };
 
         private readonly IEnumerable<string> TestExampleMethodPrefixes = new List<string>
         {
             "when_",
             "it_", 
-            "should_"
+            "should_", 
+            "then_"
         };
 
         private readonly List<test_example> _examples = new List<test_example>();
@@ -320,11 +224,11 @@
             cleanup = null;
         }
 
-		public virtual void fail_specification()
-		{
-			Console.WriteLine("Specification Failed");
-		}
-		
+        public virtual void fail_context()
+        {
+            Console.WriteLine("Specification Failed");
+        }
+
         public static string normalize(string text)
         {
             return text.Replace("_", " ");
@@ -353,7 +257,7 @@
 
             if ( failedCondtions.Any() )
             {
-                fail_specification();
+                fail_context();
             }
 
             _verbalizer.Clear();
@@ -371,6 +275,8 @@
                 .Select(m => m)
                 .ToList();
 
+            _setupMethods = preserve_inheritance_chain_on_methods(_setupMethods);
+
             _teardownMethods = GetType()
                 .GetMethods(bindings)
                 .Where(m => m.GetParameters().Length == 0)
@@ -378,6 +284,8 @@
                 .Where(m => TeardownMethodPrefixes.Any(tdm => m.Name.StartsWith(tdm)))
                 .Select(m => m)
                 .ToList();
+
+            _teardownMethods = preserve_inheritance_chain_on_methods(_teardownMethods);
 
             var examples = GetType()
                 .GetMethods(bindings)
@@ -387,10 +295,23 @@
                 .Select(m => m)
                 .ToList();
 
+            examples = preserve_inheritance_chain_on_methods(examples);
+
             foreach ( var example in examples )
             {
                 var testExample = new test_example { Name = example.Name };
-                example.Invoke(this, null);
+
+                try
+                {
+                    example.Invoke(this, null);
+                }
+                catch
+                {
+                    // method used as test condition, record it on the test example:
+                    var condition = new test_condition();
+                    condition[normalize(example.Name)] = () => example.Invoke(this, null);
+                    testExample.ExampleMethodAsTestCondition = condition;
+                }
 
                 if ( establish != null )
                     testExample.PreConditions.Add(new Action(establish));
@@ -411,5 +332,19 @@
 
                 _examples.Add(testExample);
             }
+        }
+
+        private List<MethodInfo> preserve_inheritance_chain_on_methods(List<MethodInfo> methods)
+        {
+            var preservedInheritanceChainMethods = methods;
+
+            if ( this.GetType().BaseType != typeof(specification_context) & methods.Any() )
+            {
+                var foundMethods = methods.ToArray();
+                Array.Reverse(foundMethods);
+                preservedInheritanceChainMethods = new List<MethodInfo>(foundMethods);
+            }
+
+            return preservedInheritanceChainMethods;
         }
     }
