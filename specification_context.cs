@@ -1,350 +1,420 @@
-    using System;
-    using System.Collections.Generic;
-    using System.Reflection;
-    using System.Text;
-    using System.Linq;
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Text;
+using System.Linq;
 
-    /// <summary>
-    /// Represents a top-level class that holds all of the specifications for a given concern.
-    /// </summary>
-    public class test_scenario
+/// <summary>
+/// Attribute to skip a specification for testing.
+/// </summary>
+[AttributeUsage(AttributeTargets.Class, Inherited =  true)]
+public class SkipAttribute : Attribute
+{
+}
+
+/// <summary>
+/// Attribute to tag test example method as the only one to test in a specification.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method, Inherited = true)]
+public class TagAttribute : Attribute
+{
+}
+
+/// <summary>
+/// Represents a top-level class that holds all of the specifications for a given concern.
+/// </summary>
+public class test_scenario
+{
+    public string Name { get; set; }
+    public List<test_example> Examples { get; set; }
+
+    public test_scenario()
     {
-        public string Name { get; set; }
-        public List<test_example> Examples { get; set; }
+        Examples = new List<test_example>();
+    }
+}
 
-        public test_scenario()
+/// <summary>
+/// Represents a method in the specifications that contains all of the invocations and assertions for specified conditions.
+/// </summary>
+public class test_example
+{
+    public string Name { get; set; }
+    public bool IsSkipped { get; set; }
+    public test_condition ExampleMethodAsTestCondition { get; set; }
+    public List<test_condition> Conditions { get; set; }
+    public List<Action> PreConditions { get; set; }
+    public List<Action> PostConditions { get; set; }
+
+    public test_example()
+    {
+        PreConditions = new List<Action>();
+        Conditions = new List<test_condition>();
+        PostConditions = new List<Action>();
+    }
+
+    public void execute(StringBuilder verbalizer)
+    {
+        PreConditions.ForEach(condition => condition());
+
+        if ( ExampleMethodAsTestCondition != null )
         {
-            Examples = new List<test_example>();
+            examine_for_pass_or_failure(ExampleMethodAsTestCondition, verbalizer, 1);
+        }
+        else
+        {
+            var statement = specification_context.normalize(Name);
+            verbalizer.AppendFormat("\t{0}", statement).AppendLine();
+
+            foreach ( var condition in Conditions )
+            {
+                examine_for_pass_or_failure(condition, verbalizer);
+            }
+        }
+
+        PostConditions.ForEach(condition => condition());
+    }
+
+    private void examine_for_pass_or_failure(
+        test_condition condition,
+        StringBuilder verbalizer,
+        int indentLevel = 2)
+    {
+        string message = string.Empty;
+        string indent = string.Empty;
+
+        Enumerable.Range(1, indentLevel)
+            .ToList()
+            .ForEach(i => indent += "\t");
+
+        if (IsSkipped)
+        {
+            message = string.Format("{0} : skipped", condition);
+            verbalizer.AppendFormat("{0}{1}", indent, message).AppendLine();
+            return;
+        }
+
+        if ( condition.Action == specification_context.todo )
+        {
+            message = string.Format("{0} : pending", condition);
+            verbalizer.AppendFormat("{0}{1}", indent, message).AppendLine();
+            return;
+        }
+
+        try
+        {
+            message = string.Format("{0} : passed", condition);
+            condition.Action();
+        }
+        catch ( Exception testConditionFailureException )
+        {
+            message = string.Format("{0} : failed", condition);
+            condition.Failed(testConditionFailureException);
+        }
+        finally
+        {
+            verbalizer.AppendFormat("{0}{1}", indent, message).AppendLine();
+        }
+    }
+}
+
+/// <summary>
+/// Represents the individual test condition with invocation logic for determining the success or failure of a condition.
+/// </summary>
+public class test_condition
+{
+    public string Name { get; private set; }
+    public Action Action { get; private set; }
+    public Exception Exception { get; private set; }
+
+    public void Failed(Exception exception)
+    {
+        Exception = exception;
+    }
+
+    public Action this[string name]
+    {
+        set
+        {
+            Name = name;
+            Action = value;
         }
     }
 
-    /// <summary>
-    /// Represents a method in the specifications that contains all of the invocations and assertions for specified conditions.
-    /// </summary>
-    public class test_example
+    public override string ToString()
     {
-        public string Name { get; set; }
-        public test_condition ExampleMethodAsTestCondition { get; set; }
-        public List<test_condition> Conditions { get; set; }
-        public List<Action> PreConditions { get; set; }
-        public List<Action> PostConditions { get; set; }
+        var builder = new StringBuilder();
 
-        public test_example()
+        if ( Name.StartsWith("it") == false )
+            Name = string.Format("it {0}", Name);
+
+        builder.AppendFormat("{0}", Name);
+        return builder.ToString();
+    }
+}
+
+/// <summary>
+/// Base class for creating test scenarios around a central theme or context
+/// </summary>
+public abstract class specification_context
+{
+    private const int BannerCharacterCount = 10;
+    private const string MethodForTestConsiderationCharacter = "_";
+
+    private readonly IEnumerable<string> SetupMethodsPrefixes = new List<string>
+    {
+        "before_",
+        "given_"
+    };
+
+    private readonly IEnumerable<string> TeardownMethodPrefixes = new List<string>
+    {
+        "after_",
+        "finally_"
+    };
+
+    private readonly IEnumerable<string> TestExampleMethodPrefixes = new List<string>
+    {
+        "when_",
+        "it_",
+        "should_",
+        "then_"
+    };
+
+    private readonly List<test_example> _examples = new List<test_example>();
+    private readonly List<test_condition> _conditions = new List<test_condition>();
+    private readonly StringBuilder _verbalizer = new StringBuilder();
+    private List<MethodInfo> _setupMethods;
+    private List<MethodInfo> _teardownMethods;
+
+    /// <summary>
+    /// Action to setup the initial context for a test condition
+    /// </summary>
+    public Action establish { get; set; }
+
+    /// <summary>
+    /// Action to execute for inspection against a set of test conditions.
+    /// </summary>
+    public Action because { get; set; }
+
+    /// <summary>
+    /// Action for closing the text context and restoring any items that may have been affected during the test.
+    /// </summary>
+    public Action cleanup { get; set; }
+
+    /// <summary>
+    /// Marker for test conditions that will need to be considered at a later time when more information is gathered.
+    /// </summary>
+    public static readonly Action todo = () => { };
+
+    /// <summary>
+    /// Marker for a named test condition with an action associated with it for inspection.
+    /// </summary>
+    public test_condition it
+    {
+        get
         {
-            PreConditions = new List<Action>();
-            Conditions = new List<test_condition>();
-            PostConditions = new List<Action>();
+            var condition = new test_condition();
+            _conditions.Add(condition);
+            return condition;
+        }
+    }
+
+    protected specification_context()
+    {
+        setup_test_conditions_from_examples();
+    }
+
+    protected void execute_context()
+    {
+        _verbalizer.AppendLine(IsSkipped(this.GetType())
+            ? string.Format("{0} (skipped)", GetType().Name)
+            : normalize(GetType().Name));
+
+        if ( _setupMethods != null )
+            _setupMethods.ForEach(m => m.Invoke(this, null));
+
+        foreach ( var example in _examples )
+        {
+            example.execute(_verbalizer);
         }
 
-        public void execute(StringBuilder verbalizer)
+        if ( _teardownMethods != null )
+            _teardownMethods.ForEach(m => m.Invoke(this, null));
+
+        verbalize();
+    }
+
+    public virtual void tear_down_context(bool teardown = true)
+    {
+        verbalize();
+        establish = null;
+        because = null;
+        cleanup = null;
+    }
+
+    public virtual void fail_context()
+    {
+        Console.WriteLine("Specification Failed");
+    }
+
+    public static string normalize(string text)
+    {
+        return text.Replace("_", " ");
+    }
+
+    private void verbalize()
+    {
+        var failedConditions = _examples
+            .SelectMany(ex => ex.Conditions.Where(con => con.Exception != null))
+            .ToList();
+
+        var failedExampleMethods = _examples
+            .Where(ex => ex.ExampleMethodAsTestCondition != null && ex.ExampleMethodAsTestCondition.Exception != null)
+            .Select(ex => ex.ExampleMethodAsTestCondition)
+            .ToList();
+
+        failedConditions.AddRange(failedExampleMethods);
+
+        if ( failedConditions.Any() )
         {
-            PreConditions.ForEach(condition => condition());
+            var failed = new StringBuilder();
+            failed.AppendLine(string.Format("{0} FAILURES {0}", new string('*', BannerCharacterCount)));
 
-            if ( ExampleMethodAsTestCondition != null )
-            {
-                examine_for_pass_or_failure(ExampleMethodAsTestCondition, verbalizer, 1);
-            }
-            else
-            {
-                var statement = specification_context.normalize(Name);
-                verbalizer.AppendFormat("\t{0}", statement).AppendLine();
+            failedConditions.ForEach(condition =>
+                failed.AppendLine(String.Format(">> {0} - FAILED\n{1}",
+                    condition.ToString(), condition.Exception)));
 
-                foreach ( var condition in Conditions )
-                {
-                    examine_for_pass_or_failure(condition, verbalizer);
-                }
-            }
-
-            PostConditions.ForEach(condition => condition());
+            _verbalizer.AppendLine(failed.ToString());
         }
 
-        private void examine_for_pass_or_failure(
-            test_condition condition,
-            StringBuilder verbalizer,
-            int indentLevel = 2)
+        Console.WriteLine(_verbalizer.ToString());
+
+        if ( failedConditions.Any() )
         {
-            string message = string.Empty;
-            string indent = string.Empty; 
+            fail_context();
+        }
 
-            Enumerable.Range(1, indentLevel)
-                .ToList()
-                .ForEach(i => indent += "\t");
-                
+        _verbalizer.Clear();
+    }
 
-            if ( condition.Action == specification_context.todo )
-            {
-                message = string.Format("{0} : pending", condition);
-                verbalizer.AppendFormat("{0}{1}", indent, message).AppendLine();
-                return;
-            }
+    private void setup_test_conditions_from_examples()
+    {
+        const BindingFlags bindings = BindingFlags.Instance | BindingFlags.Public;
+
+        _setupMethods = GetType()
+            .GetMethods(bindings)
+            .Where(ItIsAMethodForConsideration)
+            .Where(m => SetupMethodsPrefixes.Any(sem => m.Name.StartsWith(sem)))
+            .Select(m => m)
+            .ToList();
+
+        _setupMethods = preserve_inheritance_chain_on_methods(_setupMethods);
+
+        _teardownMethods = GetType()
+            .GetMethods(bindings)
+            .Where(ItIsAMethodForConsideration)
+            .Where(m => TeardownMethodPrefixes.Any(tdm => m.Name.StartsWith(tdm)))
+            .Select(m => m)
+            .ToList();
+
+        _teardownMethods = preserve_inheritance_chain_on_methods(_teardownMethods);
+
+        var examples = GetType()
+            .GetMethods(bindings)
+            .Where(ItIsAMethodForConsideration)
+            .Where(m => TestExampleMethodPrefixes.Any(tem => m.Name.StartsWith(tem)))
+            .Select(m => m)
+            .ToList();
+
+        examples = preserve_inheritance_chain_on_methods(examples);
+
+        examples = GetTaggedMethods(examples);
+
+        compile_all_examples_for_testing(examples); 
+    }
+
+    private void compile_all_examples_for_testing(IEnumerable<MethodInfo> examples)
+    {
+        foreach ( var example in examples )
+        {
+            var testExample = new test_example { Name = example.Name, IsSkipped = IsSkipped(example.DeclaringType) };
 
             try
             {
-                message = string.Format("{0} : passed", condition);
-                condition.Action();
+                example.Invoke(this, null);
             }
-            catch ( Exception testConditionFailureException )
+            catch
             {
-                message = string.Format("{0} : failed", condition);
-                condition.Failed(testConditionFailureException);
-            }
-            finally
-            {
-                verbalizer.AppendFormat("{0}{1}", indent, message).AppendLine();
-            }
-        }
-    }
-
-    /// <summary>
-    /// Represents the individual test condition with invocation logic for determining the success or failure of a condition.
-    /// </summary>
-    public class test_condition
-    {
-        public string Name { get; private set; }
-        public Action Action { get; private set; }
-        public Exception Exception { get; private set; }
-
-        public void Failed(Exception exception)
-        {
-            Exception = exception;
-        }
-
-        public Action this[string name]
-        {
-            set
-            {
-                Name = name;
-                Action = value;
-            }
-        }
-
-        public override string ToString()
-        {
-            var builder = new StringBuilder();
-            builder.AppendFormat("{0}", Name);
-            return builder.ToString();
-        }
-    }
-
-    /// <summary>
-    /// Base class for creating test scenarios around a central theme or context
-    /// </summary>
-    public abstract class specification_context
-    {
-        private const int BannerCharacterCount = 80;
-
-        private readonly IEnumerable<string> SetupMethodsPrefixes = new List<string>
-        {
-            "before_",
-            "given_"
-        };
-
-        private readonly IEnumerable<string> TeardownMethodPrefixes = new List<string>
-        {
-            "after_", 
-            "finally_"
-        };
-
-        private readonly IEnumerable<string> TestExampleMethodPrefixes = new List<string>
-        {
-            "when_",
-            "it_", 
-            "should_", 
-            "then_"
-        };
-
-        private readonly List<test_example> _examples = new List<test_example>();
-        private readonly List<test_condition> _conditions = new List<test_condition>();
-        private readonly StringBuilder _verbalizer = new StringBuilder();
-        private List<MethodInfo> _setupMethods;
-        private List<MethodInfo> _exampleMethods;
-        private List<MethodInfo> _teardownMethods;
-
-        /// <summary>
-        /// Action to setup the initial context for a test condition
-        /// </summary>
-        public Action establish { get; set; }
-
-        /// <summary>
-        /// Action to execute for inspection against a set of test conditions.
-        /// </summary>
-        public Action because { get; set; }
-
-        /// <summary>
-        /// Action for closing the text context and restoring any items that may have been affected during the test.
-        /// </summary>
-        public Action cleanup { get; set; }
-
-        /// <summary>
-        /// Marker for test conditions that will need to be considered at a later time when more information is gathered.
-        /// </summary>
-        public static readonly Action todo = () => { };
-
-        /// <summary>
-        /// Marker for a named test condition with an action associated with it for inspection.
-        /// </summary>
-        public test_condition it
-        {
-            get
-            {
+                // method used as test condition, record it on the test example:
                 var condition = new test_condition();
-                _conditions.Add(condition);
-                return condition;
-            }
-        }
-
-        protected specification_context()
-        {
-            setup_test_conditions_from_examples();
-        }
-
-        protected void execute_context()
-        {
-            _verbalizer.AppendLine(normalize(GetType().Name));
-
-            if ( _setupMethods != null )
-                _setupMethods.ForEach(m => m.Invoke(this, null));
-
-            foreach ( var example in _examples )
-            {
-                example.execute(_verbalizer);
+                condition[normalize(example.Name)] = () => example.Invoke(this, null);
+                testExample.ExampleMethodAsTestCondition = condition;
             }
 
-            if ( _teardownMethods != null )
-                _teardownMethods.ForEach(m => m.Invoke(this, null));
+            if ( establish != null )
+                testExample.PreConditions.Add(new Action(establish));
 
-            verbalize();
-        }
+            if ( because != null )
+                testExample.PreConditions.Add(new Action(because));
 
-        public virtual void tear_down_context(bool teardown = true)
-        {
-            verbalize();
+            if ( cleanup != null )
+                testExample.PostConditions.Add(new Action(cleanup));
+
+            testExample.Conditions = new List<test_condition>(_conditions);
+
+            _conditions.Clear();
+
             establish = null;
             because = null;
             cleanup = null;
-        }
 
-        public virtual void fail_context()
-        {
-            Console.WriteLine("Specification Failed");
-        }
-
-        public static string normalize(string text)
-        {
-            return text.Replace("_", " ");
-        }
-
-        private void verbalize()
-        {
-            var failedCondtions = _examples
-                .SelectMany(ex => ex.Conditions.Where(con => con.Exception != null))
-                .ToList();
-
-            if ( failedCondtions.Any() )
-            {
-                var failed = new StringBuilder();
-                failed.AppendLine(new string('=', BannerCharacterCount));
-
-                failedCondtions.ForEach(condition =>
-                    failed.AppendLine(String.Format(">> {0} - FAILED\n{1}",
-                        condition.ToString(), condition.Exception)));
-
-                _verbalizer.AppendLine(failed.ToString());
-            }
-
-            Console.WriteLine();
-            Console.WriteLine(_verbalizer.ToString());
-
-            if ( failedCondtions.Any() )
-            {
-                fail_context();
-            }
-
-            _verbalizer.Clear();
-        }
-
-        private void setup_test_conditions_from_examples()
-        {
-            const BindingFlags bindings = BindingFlags.Instance | BindingFlags.Public;
-
-            _setupMethods = GetType()
-                .GetMethods(bindings)
-                .Where(m => m.GetParameters().Length == 0)
-                .Where(m => m.ReturnType == typeof(void))
-                .Where(m => SetupMethodsPrefixes.Any(sem => m.Name.StartsWith(sem)))
-                .Select(m => m)
-                .ToList();
-
-            _setupMethods = preserve_inheritance_chain_on_methods(_setupMethods);
-
-            _teardownMethods = GetType()
-                .GetMethods(bindings)
-                .Where(m => m.GetParameters().Length == 0)
-                .Where(m => m.ReturnType == typeof(void))
-                .Where(m => TeardownMethodPrefixes.Any(tdm => m.Name.StartsWith(tdm)))
-                .Select(m => m)
-                .ToList();
-
-            _teardownMethods = preserve_inheritance_chain_on_methods(_teardownMethods);
-
-            var examples = GetType()
-                .GetMethods(bindings)
-                .Where(m => m.GetParameters().Length == 0)
-                .Where(m => m.ReturnType == typeof(void))
-                .Where(m => TestExampleMethodPrefixes.Any(tem => m.Name.StartsWith(tem)))
-                .Select(m => m)
-                .ToList();
-
-            examples = preserve_inheritance_chain_on_methods(examples);
-
-            foreach ( var example in examples )
-            {
-                var testExample = new test_example { Name = example.Name };
-
-                try
-                {
-                    example.Invoke(this, null);
-                }
-                catch
-                {
-                    // method used as test condition, record it on the test example:
-                    var condition = new test_condition();
-                    condition[normalize(example.Name)] = () => example.Invoke(this, null);
-                    testExample.ExampleMethodAsTestCondition = condition;
-                }
-
-                if ( establish != null )
-                    testExample.PreConditions.Add(new Action(establish));
-
-                if ( because != null )
-                    testExample.PreConditions.Add(new Action(because));
-
-                if ( cleanup != null )
-                    testExample.PostConditions.Add(new Action(cleanup));
-
-                testExample.Conditions = new List<test_condition>(_conditions);
-
-                _conditions.Clear();
-
-                establish = null;
-                because = null;
-                cleanup = null;
-
-                _examples.Add(testExample);
-            }
-        }
-
-        private List<MethodInfo> preserve_inheritance_chain_on_methods(List<MethodInfo> methods)
-        {
-            var preservedInheritanceChainMethods = methods;
-
-            if ( this.GetType().BaseType != typeof(specification_context) & methods.Any() )
-            {
-                var foundMethods = methods.ToArray();
-                Array.Reverse(foundMethods);
-                preservedInheritanceChainMethods = new List<MethodInfo>(foundMethods);
-            }
-
-            return preservedInheritanceChainMethods;
+            _examples.Add(testExample);
         }
     }
+
+    private static bool ItIsAMethodForConsideration(MethodInfo method)
+    {
+        var result = method.ReturnType == typeof (void)
+                     && method.Name.Contains(MethodForTestConsiderationCharacter)
+                     && method.GetParameters().Length == 0;
+        return result;
+    }
+
+    private static bool IsSkipped(Type specificationType)
+    {
+        var result = ( ( specificationType.IsClass || specificationType.IsAbstract )
+               & specificationType.GetCustomAttributes(typeof(SkipAttribute), true).Length == 1 );
+        return result;
+    }
+
+    private static List<MethodInfo> GetTaggedMethods(List<MethodInfo> methods)
+    {
+        var tagged = methods
+            .Where(m => m.GetCustomAttributes(typeof (TagAttribute), true).Length > 0)
+            .Select(m => m)
+            .Distinct()
+            .ToList();
+
+        if (!tagged.Any())
+        {
+            tagged = methods;
+        }
+
+        return tagged;
+    }
+
+    private List<MethodInfo> preserve_inheritance_chain_on_methods(List<MethodInfo> methods)
+    {
+        var preservedInheritanceChainMethods = methods;
+
+        if ( this.GetType().BaseType != typeof(specification_context) & methods.Any() )
+        {
+            var foundMethods = methods.ToArray();
+            Array.Reverse(foundMethods);
+            preservedInheritanceChainMethods = new List<MethodInfo>(foundMethods);
+        }
+
+        return preservedInheritanceChainMethods;
+    }
+}
