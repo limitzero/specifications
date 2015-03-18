@@ -514,34 +514,7 @@ public abstract class specification_context
                 IsSkipped = IsSkipped(example.DeclaringType)
             };
 
-            //try
-            //{
-            //    example.Invoke(this, null);
-            //}
-            //catch
-            //{
-            //    // method used as test condition, record it as a test condition on the test example:
-            //    var condition = new test_condition();
-            //    condition[normalize(example.Name)] = () => example.Invoke(this, null);
-            //    testExample.ExampleMethodAsTestCondition = condition;
-            //}
-
-            //if ( establish != null )
-            //    testExample.PreConditions.Add(new Action(establish));
-
-            //if ( because != null )
-            //    testExample.PreConditions.Add(new Action(because));
-
-            //if ( cleanup != null )
-            //    testExample.PostConditions.Add(new Action(cleanup));
-
-            //testExample.Conditions = new List<test_condition>(_conditions);
-
-            //_conditions.Clear();
-
-            //establish = null;
-            //because = null;
-            //cleanup = null;
+            // moved to test example for execution:
 
             _examples.Add(testExample);
         }
