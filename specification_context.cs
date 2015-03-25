@@ -126,7 +126,6 @@ public class test_example
 
     private void evaluate_example()
     {
-
         // clean pre and post actions for the example before inspection:
         _context.establish = null;
         _context.because = null;
@@ -135,6 +134,14 @@ public class test_example
         try
         {
             _method.Invoke(_context, null);
+
+            if (_context.get_test_conditions().Any() == false)
+            {
+                // method used as test condition, record it as a test condition on the test example:
+                var condition = new test_condition();
+                condition[specification_context.normalize(Name)] = () => _method.Invoke(this, null);
+                this.ExampleMethodAsTestCondition = condition;
+            }
         }
         catch
         {
