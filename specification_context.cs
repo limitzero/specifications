@@ -59,7 +59,7 @@ public class invokable_action
 
         if ( _action != null )
         {
-            _action.Invoke();
+            _action.DynamicInvoke();
         }
 
         IsInvoked = true;
@@ -104,6 +104,7 @@ public class test_example
     public string Tag { get; set; }
     public bool IsSkipped { get; set; }
     public test_condition ExampleMethodAsTestCondition { get; set; }
+    public List<MethodInfo> ActMethods { get; set;}
     public List<test_condition> Conditions { get; set; }
     public List<invokable_action> PreConditions { get; set; }
     public List<invokable_action> PostConditions { get; set; }
@@ -130,7 +131,7 @@ public class test_example
         _context.establish = null;
         _context.because = null;
         _context.cleanup = null; 
-
+		
         try
         {
             _method.Invoke(_context, null);
@@ -139,7 +140,7 @@ public class test_example
             {
                 // method used as test condition, record it as a test condition on the test example:
                 var condition = new test_condition();
-                condition[specification_context.normalize(Name)] = () => _method.Invoke(this, null);
+                condition[specification_context.normalize(Name)] = () => _method.Invoke(_context, null);
                 this.ExampleMethodAsTestCondition = condition;
             }
         }
@@ -147,7 +148,7 @@ public class test_example
         {
             // method used as test condition, record it as a test condition on the test example:
             var condition = new test_condition();
-            condition[specification_context.normalize(Name)] = () => _method.Invoke(this, null);
+            condition[specification_context.normalize(Name)] = () => _method.Invoke(_context, null);
             this.ExampleMethodAsTestCondition = condition;
         }
 
@@ -168,6 +169,9 @@ public class test_example
     private void execute_example()
     {
         PreConditions.ForEach(condition => condition.Invoke());
+
+        if ( ActMethods != null && ActMethods.Any() )
+            ActMethods.ForEach(am => am.Invoke(_context, null));
 
         if ( ExampleMethodAsTestCondition != null )
         {
@@ -299,10 +303,17 @@ public abstract class specification_context
     private const int BannerCharacterCount = 10;
     private const string MethodForTestConsiderationCharacter = "_";
 
-    private readonly IEnumerable<string> SetupMethodsPrefixes = new List<string>
+    private readonly IEnumerable<string> ArrangeMethodPrefixes = new List<string>
     {
         "before_",
-        "given_"
+        "given_", 
+        "arrange_"
+    };
+
+    private readonly IEnumerable<string> ActMethodPrefixes = new List<string>
+    {
+        "act_",
+        "do_", 
     };
 
     private readonly IEnumerable<string> TeardownMethodPrefixes = new List<string>
@@ -316,13 +327,15 @@ public abstract class specification_context
         "when_",
         "it_",
         "should_",
-        "then_"
+        "then_", 
+        "assert_"
     };
 
     private HashSet<test_example> _examples = new HashSet<test_example>();
     private HashSet<test_condition> _conditions = new HashSet<test_condition>();
     private StringBuilder _verbalizer = new StringBuilder();
-    private List<MethodInfo> _setupMethods;
+    private List<MethodInfo> _arrangeMethods;
+    private List<MethodInfo> _actMethods; 
     private List<MethodInfo> _teardownMethods;
     private List<string> _tags = new List<string>();
     private static readonly object _execute_lock = new object();
@@ -378,11 +391,16 @@ public abstract class specification_context
                 ? string.Format("{0} (skipped)", specification_under_test)
                 : specification_under_test);
 
-            if ( _setupMethods != null )
-                _setupMethods.ForEach(m => m.Invoke(this, null));
+            if(_arrangeMethods != null)
+                _arrangeMethods.ForEach(m =>  m.Invoke(this, null));
 
-            foreach ( var example in _examples )
+            var examples = _examples
+                .Where(e => e.IsSkipped == false)
+                .ToList();
+
+            foreach ( var example in examples )
             {
+                example.ActMethods = _actMethods;
                 example.execute(_verbalizer);
             }
 
@@ -427,7 +445,8 @@ public abstract class specification_context
     {
         _examples = new HashSet<test_example>();
         _conditions = new HashSet<test_condition>();
-        _setupMethods = new List<MethodInfo>();
+        _arrangeMethods = new List<MethodInfo>();
+        _actMethods = new List<MethodInfo>();
         _teardownMethods = new List<MethodInfo>();
         _tags = new List<string>();
         _verbalizer = new StringBuilder();
@@ -472,15 +491,15 @@ public abstract class specification_context
     {
         const BindingFlags bindings = BindingFlags.Instance | BindingFlags.Public;
 
-        _setupMethods = GetType()
+        _arrangeMethods = GetType()
             .GetMethods(bindings)
             .Where(ItIsAMethodForConsideration)
-            .Where(m => SetupMethodsPrefixes.Any(sem => m.Name.StartsWith(sem)))
+            .Where(m => ArrangeMethodPrefixes.Any(sem => m.Name.StartsWith(sem)))
             .Select(m => m)
             .Distinct()
             .ToList();
 
-        _setupMethods = preserve_inheritance_chain_on_methods(_setupMethods);
+        _arrangeMethods = preserve_inheritance_chain_on_methods(_arrangeMethods);
 
         _teardownMethods = GetType()
             .GetMethods(bindings)
@@ -491,6 +510,17 @@ public abstract class specification_context
             .ToList();
 
         _teardownMethods = preserve_inheritance_chain_on_methods(_teardownMethods);
+
+        _actMethods  = GetType()
+            .GetMethods(bindings)
+            .Where(ItIsAMethodForConsideration)
+            .Where(m => IsSkipped(m.DeclaringType) == false)
+            .Where(m => ActMethodPrefixes.Any(sem => m.Name.StartsWith(sem)))
+            .Select(m => m)
+            .Distinct()
+            .ToList();
+
+        _actMethods = preserve_inheritance_chain_on_methods(_actMethods);
 
         var examples = GetType()
             .GetMethods(bindings)
@@ -521,7 +551,7 @@ public abstract class specification_context
                 IsSkipped = IsSkipped(example.DeclaringType)
             };
 
-            // moved to test example for execution:
+            // --- moved to test example for execution ----
 
             _examples.Add(testExample);
         }
