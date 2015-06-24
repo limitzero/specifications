@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Dynamic;
 using System.Reflection;
 using System.Text;
 using System.Linq;
@@ -375,6 +377,10 @@ public abstract class specification_context
 
     protected specification_context()
     {
+#if !DEBUG
+        Trace.Listeners.Add(new ConsoleTraceListener());
+#endif
+
         reset_context();
         setup_test_conditions_from_examples();
     }
@@ -423,7 +429,8 @@ public abstract class specification_context
 
     public virtual void fail_context()
     {
-        Console.WriteLine("Specification Failed");
+        Trace.WriteLine("Specification Failed");
+        //Console.WriteLine("Specification Failed");
     }
 
     public List<test_condition> get_test_conditions()
@@ -477,7 +484,8 @@ public abstract class specification_context
             _verbalizer.AppendLine(failed.ToString());
         }
 
-        Console.WriteLine(_verbalizer.ToString());
+        Trace.WriteLine(_verbalizer.ToString());
+        //Console.WriteLine(_verbalizer.ToString());
 
         if ( failedConditions.Any() )
         {
@@ -555,6 +563,8 @@ public abstract class specification_context
 
             _examples.Add(testExample);
         }
+
+        _examples = new HashSet<test_example>(_examples.Reverse());
     }
 
     private static bool ItIsAMethodForConsideration(MethodInfo method)
