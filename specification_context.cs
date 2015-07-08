@@ -8,7 +8,6 @@ using System.Linq;
  * Notes:
  * On rasing events from Moq, please check the verification condition to be Times.AtLeastOnce() instead of Times.Once.
  */
-using CQRS.Portable.Extensiblity;
 
 /// <summary>
 /// Attribute to skip a specification for testing.
