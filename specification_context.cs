@@ -1,15 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Dynamic;
 using System.Reflection;
 using System.Text;
 using System.Linq;
-
 /*
  * Notes:
  * On rasing events from Moq, please check the verification condition to be Times.AtLeastOnce() instead of Times.Once.
  */
+using CQRS.Portable.Extensiblity;
+
 /// <summary>
 /// Attribute to skip a specification for testing.
 /// </summary>
@@ -430,7 +430,6 @@ public abstract class specification_context
     public virtual void fail_context()
     {
         Trace.WriteLine("Specification Failed");
-        //Console.WriteLine("Specification Failed");
     }
 
     public List<test_condition> get_test_conditions()
@@ -469,7 +468,7 @@ public abstract class specification_context
             .Where(ex => ex.ExampleMethodAsTestCondition != null && ex.ExampleMethodAsTestCondition.Exception != null)
             .Select(ex => ex.ExampleMethodAsTestCondition)
             .ToList();
-
+                                             
         failedConditions.AddRange(failedExampleMethods);
 
         if ( failedConditions.Any() )
@@ -479,13 +478,12 @@ public abstract class specification_context
 
             failedConditions.ForEach(condition =>
                 failed.AppendLine(String.Format(">> {0} - FAILED\n{1}",
-                    condition.ToString(), condition.Exception)));
+                    condition.ToString(), clean_test_condition_exception(condition.Exception))));
 
             _verbalizer.AppendLine(failed.ToString());
         }
 
         Trace.WriteLine(_verbalizer.ToString());
-        //Console.WriteLine(_verbalizer.ToString());
 
         if ( failedConditions.Any() )
         {
@@ -493,6 +491,24 @@ public abstract class specification_context
         }
 
         _verbalizer.Clear();
+    }
+
+    private string clean_test_condition_exception(Exception testConditionException)
+    {
+        var builder = new StringBuilder();
+
+        var triggeredConditionException = testConditionException.InnerException;
+        if (triggeredConditionException == null) return string.Empty;
+
+        var message = triggeredConditionException.Message
+            .Split(new string[] { Environment.NewLine },
+            StringSplitOptions.RemoveEmptyEntries)
+            .Select(m => m).ToList();
+
+        builder.AppendLine(string.Join(Environment.NewLine, message));
+        builder.AppendLine(triggeredConditionException.StackTrace);
+
+        return builder.ToString();
     }
 
     private void setup_test_conditions_from_examples()
