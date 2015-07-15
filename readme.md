@@ -161,7 +161,9 @@ calculator specifications
 What you are seeing here is the parsing of the specification into its differing parts for a more English-sounding description of what the calculator should do under certain circumstances. 
 
 ### Reducing work in the specification via the "establish" and "because" actions
-When you have a specification and need to initialize information before the test condition is examined, you can use the "establish" lambda property to assign an action to execute your setup. Also, the "because" lambda property can excercise the action on the subject under test to further clarify the test conditions just for assertions. This will be similiar to the Arrange-Act-Assert method used for TDD and BDD.
+When you have a specification and need to initialize information before the test condition is examined, you can use the "establish" lambda property to assign an action to execute your setup. Also, the "because" lambda property can excercise the action on the subject under test to further clarify the test conditions just for assertions. This will be similiar to the Arrange-Act-Assert method used for TDD and BDD (also the "verify" lamba can be used instead of the named test condition i.e. "it[...]" for simple assertions).
+
+Due to the way the specifications are evaluated, please include all code in the test example methods in either the "establish", "because", the named test condition (i.e. it["..."]), or the "verify" lambda methods. The most common problem that you will experience if you do not conform to this rule is an exception for null object being evaluated. The evaluation is a two-pass filter, the first is to find all potential test methods and invoke them for determining test conditions (this is where your method is invoked, and most proably where null exceptions will be thrown) and lastly to run the test conditions found from each test method.
 
 Example:
 
@@ -183,6 +185,27 @@ public class calculator_specifications : specification
         
         // this test condition will always execute after the "because" clause  -> assert:
         it["should return the result as a positive number"] = () => Assert.Equal(result, 3);
+    }
+}
+
+or with the "verify" syntax for the named test condition (i.e it["...."])
+
+public class when_adding_two_positive_numbers : specification
+{
+    // this is known as a test "example" or "scenario" condition:
+    public void it_should_return__the_result_as_a_positive_number()
+    {
+        Calculator calculator; 
+        int result = 0; 
+        
+        // this will execute first (if defined) -> arrange:
+        establish = () => calculator = new Calculator(); 
+        
+        // this will execute after the "establish" clause (if defined) -> act:
+        because = ()=> result = calculator.Add(1,2); 
+        
+        // this "verify" can be used in place of the named test condition and will always execute after the "because" clause  -> assert:
+        verify = () => Assert.Equal(result, 2);
     }
 }
 ```
