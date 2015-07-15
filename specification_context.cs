@@ -105,7 +105,7 @@ public class test_example
     public string Tag { get; set; }
     public bool IsSkipped { get; set; }
     public test_condition ExampleMethodAsTestCondition { get; set; }
-    public List<MethodInfo> ActMethods { get; set;}
+    public List<MethodInfo> ActMethods { get; set; }
     public List<test_condition> Conditions { get; set; }
     public List<invokable_action> PreConditions { get; set; }
     public List<invokable_action> PostConditions { get; set; }
@@ -131,26 +131,35 @@ public class test_example
         // clean pre and post actions for the example before inspection:
         _context.establish = null;
         _context.because = null;
-        _context.cleanup = null; 
-		
+        _context.cleanup = null;
+
+        var testCaseName = specification_context.normalize(Name); 
+
         try
         {
             _method.Invoke(_context, null);
 
-            if (_context.get_test_conditions().Any() == false)
-            {
-                // method used as test condition, record it as a test condition on the test example:
-                var condition = new test_condition();
-                condition[specification_context.normalize(Name)] = () => _method.Invoke(_context, null);
-                this.ExampleMethodAsTestCondition = condition;
-            }
+            // method used as test condition, record it as a test condition on the test example
+            // with the 'verify' block as the part for assertions to be checked against:
+            var condition = new test_condition();
+            condition[testCaseName] = () => { };
+
+            if (_context.verify != null)
+                condition[testCaseName] = () => _context.verify();
+         
+          
+            this.ExampleMethodAsTestCondition = condition;
         }
         catch
         {
-            // method used as test condition, record it as a test condition on the test example:
-            var condition = new test_condition();
-            condition[specification_context.normalize(Name)] = () => _method.Invoke(_context, null);
-            this.ExampleMethodAsTestCondition = condition;
+            // there are some variables that are being examined that are not wrapped in a test 
+            // condition or verify block (i.e. object null exceptions), send notice for all blocks to be
+            // wrapped either in test condition or verify block for runner to properly examine the test case:
+            var message = string.Format("The test case example method '{0}' has code blocks that are " +
+                "not wrapped in the 'it' or 'verify' blocks where variables are being examined before the runner " +
+                "can evaluate all conditions. Please enclose those code areas in either the 'it' named test condition block " +
+                "or the 'verify' lamba block.", testCaseName); 
+            throw new InvalidOperationException(message);
         }
 
         if ( _context.establish != null )
@@ -162,6 +171,7 @@ public class test_example
         if ( _context.cleanup != null )
             PostConditions.Add(new invokable_action(new Action(_context.cleanup)));
 
+        // gather any supporting named test conditions for the current test case example method:
         Conditions = new List<test_condition>(_context.get_test_conditions());
 
         _context.reset_test_example_conditions();
@@ -220,17 +230,20 @@ public class test_example
 
         try
         {
-            message = string.Format("{0} : passed", condition);
+            if ( string.IsNullOrEmpty(condition.ToString()) == false )
+                message = string.Format("{0} : passed", condition);
             condition.Invoke();
         }
         catch ( Exception testConditionFailureException )
         {
-            message = string.Format("{0} : failed", condition);
+            if ( string.IsNullOrEmpty(condition.ToString()) == false )
+                message = string.Format("{0} : failed", condition);
             condition.Failed(testConditionFailureException);
         }
         finally
         {
-            verbalizer.AppendFormat("{0}{1}", indent, message).AppendLine();
+            if ( string.IsNullOrEmpty(message) == false )
+                verbalizer.AppendFormat("{0}{1}", indent, message).AppendLine();
         }
     }
 }
@@ -336,7 +349,7 @@ public abstract class specification_context
     private HashSet<test_condition> _conditions = new HashSet<test_condition>();
     private StringBuilder _verbalizer = new StringBuilder();
     private List<MethodInfo> _arrangeMethods;
-    private List<MethodInfo> _actMethods; 
+    private List<MethodInfo> _actMethods;
     private List<MethodInfo> _teardownMethods;
     private List<string> _tags = new List<string>();
     private static readonly object _execute_lock = new object();
@@ -350,6 +363,11 @@ public abstract class specification_context
     /// Action to execute for inspection against a set of test conditions.
     /// </summary>
     public Action because { get; set; }
+
+    /// <summary>
+    /// Action to execute to verify the contents of a test condition without a name attached.
+    /// </summary>
+    public Action verify { get; set; }
 
     /// <summary>
     /// Action for closing the text context and restoring any items that may have been affected during the test.
@@ -376,10 +394,7 @@ public abstract class specification_context
 
     protected specification_context()
     {
-#if !DEBUG
         Trace.Listeners.Add(new ConsoleTraceListener());
-#endif
-
         reset_context();
         setup_test_conditions_from_examples();
     }
@@ -396,8 +411,8 @@ public abstract class specification_context
                 ? string.Format("{0} (skipped)", specification_under_test)
                 : specification_under_test);
 
-            if(_arrangeMethods != null)
-                _arrangeMethods.ForEach(m =>  m.Invoke(this, null));
+            if ( _arrangeMethods != null )
+                _arrangeMethods.ForEach(m => m.Invoke(this, null));
 
             var examples = _examples
                 .Where(e => e.IsSkipped == false)
@@ -467,7 +482,7 @@ public abstract class specification_context
             .Where(ex => ex.ExampleMethodAsTestCondition != null && ex.ExampleMethodAsTestCondition.Exception != null)
             .Select(ex => ex.ExampleMethodAsTestCondition)
             .ToList();
-                                             
+
         failedConditions.AddRange(failedExampleMethods);
 
         if ( failedConditions.Any() )
@@ -497,7 +512,8 @@ public abstract class specification_context
         var builder = new StringBuilder();
 
         var triggeredConditionException = testConditionException.InnerException;
-        if (triggeredConditionException == null) return string.Empty;
+        if ( triggeredConditionException == null )
+            return string.Empty;
 
         var message = triggeredConditionException.Message
             .Split(new string[] { Environment.NewLine },
@@ -534,7 +550,7 @@ public abstract class specification_context
 
         _teardownMethods = preserve_inheritance_chain_on_methods(_teardownMethods);
 
-        _actMethods  = GetType()
+        _actMethods = GetType()
             .GetMethods(bindings)
             .Where(ItIsAMethodForConsideration)
             .Where(m => IsSkipped(m.DeclaringType) == false)
