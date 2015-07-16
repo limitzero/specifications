@@ -133,22 +133,11 @@ public class test_example
         _context.because = null;
         _context.cleanup = null;
 
-        var testCaseName = specification_context.normalize(Name); 
+        var testCaseName = specification_context.normalize(Name);
 
         try
         {
             _method.Invoke(_context, null);
-
-            // method used as test condition, record it as a test condition on the test example
-            // with the 'verify' block as the part for assertions to be checked against:
-            var condition = new test_condition();
-            condition[testCaseName] = () => { };
-
-            if (_context.verify != null)
-                condition[testCaseName] = () => _context.verify();
-         
-          
-            this.ExampleMethodAsTestCondition = condition;
         }
         catch
         {
@@ -158,8 +147,23 @@ public class test_example
             var message = string.Format("The test case example method '{0}' has code blocks that are " +
                 "not wrapped in the 'it' or 'verify' blocks where variables are being examined before the runner " +
                 "can evaluate all conditions. Please enclose those code areas in either the 'it' named test condition block " +
-                "or the 'verify' lamba block.", testCaseName); 
+                "or the 'verify' lambda block.", testCaseName);
             throw new InvalidOperationException(message);
+        }
+
+        if ( _context.verify == null )
+        {
+            // method used as test condition, record it as a test condition on the test example:
+            var method_name_as_test_condition = new test_condition();
+            method_name_as_test_condition[testCaseName] = () => _method.Invoke(_context, null);
+            //this.ExampleMethodAsTestCondition = method_name_as_test_condition;
+        }
+        else
+        {
+            // method is the test example and the 'verify' lambda is the test condition:
+            var verify_lambda_as_test_condition = new test_condition();
+            verify_lambda_as_test_condition[testCaseName] = () => _context.verify();
+            this.ExampleMethodAsTestCondition = verify_lambda_as_test_condition;
         }
 
         if ( _context.establish != null )
@@ -179,16 +183,31 @@ public class test_example
 
     private void execute_example()
     {
+        // check for both 'verify' and named test conditions present:
+        if ( ExampleMethodAsTestCondition != null & Conditions.Any() )
+        {
+            // this is a no-op, should not construct test cases this way...
+            var invalidTestStructureMessage =
+                string.Format(
+                    "For the current test example method '{0}', the testing scenario should not include a 'verify' and named test conditions (i.e. it[\"..\"])." +
+                    " Please restructure the test scenario to use named test condition(s) or 'verify'.",
+                    specification_context.normalize(Name));
+            throw new InvalidOperationException(invalidTestStructureMessage);
+        }
+
         PreConditions.ForEach(condition => condition.Invoke());
 
         if ( ActMethods != null && ActMethods.Any() )
             ActMethods.ForEach(am => am.Invoke(_context, null));
 
+        // 'verify' used with no named test conditions:
         if ( ExampleMethodAsTestCondition != null )
         {
             examine_for_pass_or_failure(ExampleMethodAsTestCondition, _verbalizer, 1);
         }
-        else
+
+        // just named test conditions, no 'verify'
+        if ( Conditions.Any() )
         {
             var statement = specification_context.normalize(Name);
             _verbalizer.AppendFormat("\t{0}", statement).AppendLine();
@@ -317,26 +336,26 @@ public abstract class specification_context
     private const int BannerCharacterCount = 10;
     private const string MethodForTestConsiderationCharacter = "_";
 
-    private readonly IEnumerable<string> ArrangeMethodPrefixes = new List<string>
+    public static readonly IEnumerable<string> ArrangeMethodPrefixes = new List<string>
     {
         "before_",
         "given_", 
         "arrange_"
     };
 
-    private readonly IEnumerable<string> ActMethodPrefixes = new List<string>
+    public static readonly IEnumerable<string> ActMethodPrefixes = new List<string>
     {
         "act_",
         "do_", 
     };
 
-    private readonly IEnumerable<string> TeardownMethodPrefixes = new List<string>
+    public static readonly IEnumerable<string> TeardownMethodPrefixes = new List<string>
     {
         "after_",
         "finally_"
     };
 
-    private readonly IEnumerable<string> TestExampleMethodPrefixes = new List<string>
+    public static readonly IEnumerable<string> TestExampleMethodPrefixes = new List<string>
     {
         "when_",
         "it_",
