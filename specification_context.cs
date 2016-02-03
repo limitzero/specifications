@@ -55,10 +55,10 @@ public class invokable_action
 
     public void Invoke()
     {
-        if ( IsInvoked )
+        if (IsInvoked)
             return;
 
-        if ( _action != null )
+        if (_action != null)
         {
             _action.DynamicInvoke();
         }
@@ -151,7 +151,7 @@ public class test_example
             throw new InvalidOperationException(message);
         }
 
-        if ( _context.verify == null )
+        if (_context.verify == null)
         {
             // method used as test condition, record it as a test condition on the test example:
             var method_name_as_test_condition = new test_condition();
@@ -166,13 +166,13 @@ public class test_example
             this.ExampleMethodAsTestCondition = verify_lambda_as_test_condition;
         }
 
-        if ( _context.establish != null )
+        if (_context.establish != null)
             PreConditions.Add(new invokable_action(new Action(_context.establish)));
 
-        if ( _context.because != null )
+        if (_context.because != null)
             PreConditions.Add(new invokable_action(new Action(_context.because)));
 
-        if ( _context.cleanup != null )
+        if (_context.cleanup != null)
             PostConditions.Add(new invokable_action(new Action(_context.cleanup)));
 
         // gather any supporting named test conditions for the current test case example method:
@@ -184,7 +184,7 @@ public class test_example
     private void execute_example()
     {
         // check for both 'verify' and named test conditions present:
-        if ( ExampleMethodAsTestCondition != null & Conditions.Any() )
+        if (ExampleMethodAsTestCondition != null & Conditions.Any())
         {
             // this is a no-op, should not construct test cases this way...
             var invalidTestStructureMessage =
@@ -197,22 +197,22 @@ public class test_example
 
         PreConditions.ForEach(condition => condition.Invoke());
 
-        if ( ActMethods != null && ActMethods.Any() )
+        if (ActMethods != null && ActMethods.Any())
             ActMethods.ForEach(am => am.Invoke(_context, null));
 
         // 'verify' used with no named test conditions:
-        if ( ExampleMethodAsTestCondition != null )
+        if (ExampleMethodAsTestCondition != null)
         {
             examine_for_pass_or_failure(ExampleMethodAsTestCondition, _verbalizer, 1);
         }
 
         // just named test conditions, no 'verify'
-        if ( Conditions.Any() )
+        if (Conditions.Any())
         {
             var statement = specification_context.normalize(Name);
             _verbalizer.AppendFormat("\t{0}", statement).AppendLine();
 
-            foreach ( var condition in Conditions )
+            foreach (var condition in Conditions)
             {
                 examine_for_pass_or_failure(condition, _verbalizer);
             }
@@ -233,14 +233,14 @@ public class test_example
             .ToList()
             .ForEach(i => indent += "\t");
 
-        if ( IsSkipped )
+        if (IsSkipped)
         {
             message = string.Format("{0} : skipped", condition);
             verbalizer.AppendFormat("{0}{1}", indent, message).AppendLine();
             return;
         }
 
-        if ( condition.IsActionDefinedBy(specification_context.todo) )
+        if (condition.IsActionDefinedBy(specification_context.todo))
         {
             message = string.Format("{0} : pending", condition);
             verbalizer.AppendFormat("{0}{1}", indent, message).AppendLine();
@@ -249,19 +249,19 @@ public class test_example
 
         try
         {
-            if ( string.IsNullOrEmpty(condition.ToString()) == false )
+            if (string.IsNullOrEmpty(condition.ToString()) == false)
                 message = string.Format("{0} : passed", condition);
             condition.Invoke();
         }
-        catch ( Exception testConditionFailureException )
+        catch (Exception testConditionFailureException)
         {
-            if ( string.IsNullOrEmpty(condition.ToString()) == false )
+            if (string.IsNullOrEmpty(condition.ToString()) == false)
                 message = string.Format("{0} : failed", condition);
             condition.Failed(testConditionFailureException);
         }
         finally
         {
-            if ( string.IsNullOrEmpty(message) == false )
+            if (string.IsNullOrEmpty(message) == false)
                 verbalizer.AppendFormat("{0}{1}", indent, message).AppendLine();
         }
     }
@@ -295,10 +295,10 @@ public class test_condition
 
     public void Invoke()
     {
-        if ( IsInvoked )
+        if (IsInvoked)
             return;
 
-        if ( _action != null )
+        if (_action != null)
         {
             _action.Invoke();
         }
@@ -319,7 +319,7 @@ public class test_condition
     {
         var builder = new StringBuilder();
 
-        if ( Name.StartsWith("it") == false )
+        if (Name.StartsWith("it") == false)
             Name = string.Format("it {0}", Name);
 
         builder.AppendFormat("{0}", Name);
@@ -339,14 +339,14 @@ public abstract class specification_context
     public static readonly IEnumerable<string> ArrangeMethodPrefixes = new List<string>
     {
         "before_",
-        "given_", 
+        "given_",
         "arrange_"
     };
 
     public static readonly IEnumerable<string> ActMethodPrefixes = new List<string>
     {
         "act_",
-        "do_", 
+        "do_",
     };
 
     public static readonly IEnumerable<string> TeardownMethodPrefixes = new List<string>
@@ -360,7 +360,7 @@ public abstract class specification_context
         "when_",
         "it_",
         "should_",
-        "then_", 
+        "then_",
         "assert_"
     };
 
@@ -413,38 +413,46 @@ public abstract class specification_context
 
     protected specification_context()
     {
+        Trace.Listeners.Clear();
         Trace.Listeners.Add(new ConsoleTraceListener());
+
         reset_context();
         setup_test_conditions_from_examples();
     }
 
     protected void execute_context()
     {
-        lock ( _execute_lock )
+        lock (_execute_lock)
         {
-            display_tagged_methods(_verbalizer);
-
             var specification_under_test = normalize(GetType().Name);
 
-            _verbalizer.AppendLine(IsSkipped(GetType())
+            var isSpecificationSkipped = IsSkipped(GetType());
+
+            if (!isSpecificationSkipped)
+                display_tagged_methods(_verbalizer);
+            
+            _verbalizer.AppendLine(isSpecificationSkipped
                 ? string.Format("{0} (skipped)", specification_under_test)
                 : specification_under_test);
 
-            if ( _arrangeMethods != null )
-                _arrangeMethods.ForEach(m => m.Invoke(this, null));
-
-            var examples = _examples
-                .Where(e => e.IsSkipped == false)
-                .ToList();
-
-            foreach ( var example in examples )
+            if (!isSpecificationSkipped)
             {
-                example.ActMethods = _actMethods;
-                example.execute(_verbalizer);
-            }
+                if (_arrangeMethods != null)
+                    _arrangeMethods.ForEach(m => m.Invoke(this, null));
 
-            if ( _teardownMethods != null )
-                _teardownMethods.ForEach(m => m.Invoke(this, null));
+                var examples = _examples
+                    .Where(e => e.IsSkipped == false)
+                    .ToList();
+
+                foreach (var example in examples)
+                {
+                    example.ActMethods = _actMethods;
+                    example.execute(_verbalizer);
+                }
+
+                if (_teardownMethods != null)
+                    _teardownMethods.ForEach(m => m.Invoke(this, null));
+            }
 
             verbalize();
 
@@ -504,7 +512,7 @@ public abstract class specification_context
 
         failedConditions.AddRange(failedExampleMethods);
 
-        if ( failedConditions.Any() )
+        if (failedConditions.Any())
         {
             var failed = new StringBuilder();
             failed.AppendLine(string.Format("{0} FAILURES {0}", new string('*', BannerCharacterCount)));
@@ -518,7 +526,7 @@ public abstract class specification_context
 
         Trace.WriteLine(_verbalizer.ToString());
 
-        if ( failedConditions.Any() )
+        if (failedConditions.Any())
         {
             fail_context();
         }
@@ -531,7 +539,7 @@ public abstract class specification_context
         var builder = new StringBuilder();
 
         var triggeredConditionException = testConditionException.InnerException;
-        if ( triggeredConditionException == null )
+        if (triggeredConditionException == null)
             return string.Empty;
 
         var message = triggeredConditionException.Message
@@ -597,10 +605,10 @@ public abstract class specification_context
 
     private void compile_all_examples_for_testing(IEnumerable<MethodInfo> examples)
     {
-        foreach ( var example in examples )
+        foreach (var example in examples)
         {
             var tag = get_tagged_method_name(example);
-            if ( string.IsNullOrEmpty(tag) == false )
+            if (string.IsNullOrEmpty(tag) == false)
                 _tags.Add(tag);
 
             var testExample = new test_example(this, example, _verbalizer)
@@ -627,8 +635,8 @@ public abstract class specification_context
 
     private static bool IsSkipped(Type specificationType)
     {
-        var result = ( ( specificationType.IsClass || specificationType.IsAbstract )
-               & specificationType.GetCustomAttributes(typeof(SkipAttribute), true).Length == 1 );
+        var result = ((specificationType.IsClass || specificationType.IsAbstract)
+               & specificationType.GetCustomAttributes(typeof(SkipAttribute), true).Length == 1);
         return result;
     }
 
@@ -640,7 +648,7 @@ public abstract class specification_context
             .Distinct()
             .ToList();
 
-        if ( !tagged.Any() )
+        if (!tagged.Any())
         {
             tagged = methods;
         }
@@ -656,7 +664,7 @@ public abstract class specification_context
             .Cast<TagAttribute>()
             .FirstOrDefault();
 
-        if ( attr == null )
+        if (attr == null)
             return string.Empty;
 
         return attr.Name;
@@ -666,7 +674,7 @@ public abstract class specification_context
     private void display_tagged_methods(StringBuilder verbalizer)
     {
         var builder = new StringBuilder();
-        if ( _tags.Any() )
+        if (_tags.Any())
         {
             builder.AppendLine("Tag(s):");
             _tags.ForEach(tag => builder.AppendLine(tag));
@@ -678,7 +686,7 @@ public abstract class specification_context
     {
         var preservedInheritanceChainMethods = methods;
 
-        if ( this.GetType().BaseType != typeof(specification_context) & methods.Any() )
+        if (this.GetType().BaseType != typeof(specification_context) & methods.Any())
         {
             var foundMethods = methods.ToArray();
             Array.Reverse(foundMethods);
