@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Text;
 using System.Linq;
+using System.Threading.Tasks;
+
 /*
  * Notes:
  * On rasing events from Moq, please check the verification condition to be Times.AtLeastOnce() instead of Times.Once.
@@ -137,7 +139,9 @@ public class test_example
 
         try
         {
-            _method.Invoke(_context, null);
+            // async check only for example conditions...
+            MethodInvoker.Invoke(_method, _context);
+            //_method.Invoke(_context, null);
         }
         catch
         {
@@ -278,6 +282,15 @@ public class test_condition
     public bool IsInvoked { get; private set; }
     public Exception Exception { get; private set; }
 
+    public test_condition()
+    {
+    }
+
+    public test_condition(invokable_action action)
+    {
+        _action = action;
+    }
+
     public void Failed(Exception exception)
     {
         Exception = exception;
@@ -311,7 +324,18 @@ public class test_condition
         set
         {
             Name = name;
-            _action = new invokable_action(value);
+            if (_action == null)
+                _action = new invokable_action(value);
+        }
+    }
+
+    public Action this[string name, params object[] args]
+    {
+        set
+        {
+            Name = string.Format(name, args);
+            if (_action == null)
+                _action = new invokable_action(value);
         }
     }
 
@@ -361,7 +385,8 @@ public abstract class specification_context
         "it_",
         "should_",
         "then_",
-        "assert_"
+        "assert_", 
+		"specify_"
     };
 
     private HashSet<test_example> _examples = new HashSet<test_example>();
@@ -411,6 +436,19 @@ public abstract class specification_context
         }
     }
 
+    /// <summary>
+    /// Marker for a pending named test condition with an action associated with it for inspection.
+    /// </summary>
+    public test_condition xit
+    {
+        get
+        {
+            var condition = new test_condition(new invokable_action(todo));
+            _conditions.Add(condition);
+            return condition;
+        }
+    }
+
     protected specification_context()
     {
         Trace.Listeners.Clear();
@@ -430,7 +468,7 @@ public abstract class specification_context
 
             if (!isSpecificationSkipped)
                 display_tagged_methods(_verbalizer);
-            
+
             _verbalizer.AppendLine(isSpecificationSkipped
                 ? string.Format("{0} (skipped)", specification_under_test)
                 : specification_under_test);
@@ -627,7 +665,7 @@ public abstract class specification_context
 
     private static bool ItIsAMethodForConsideration(MethodInfo method)
     {
-        var result = method.ReturnType == typeof(void)
+        var result = (method.ReturnType == typeof(void) || method.ReturnType == typeof(Task))
                      && method.Name.Contains(MethodForTestConsiderationCharacter)
                      && method.GetParameters().Length == 0;
         return result;
@@ -694,5 +732,28 @@ public abstract class specification_context
         }
 
         return preservedInheritanceChainMethods;
+    }
+}
+
+public sealed class MethodInvoker
+{
+    public static void Invoke(MethodInfo method, object context)
+    {
+        if (method.ReturnType == typeof(Task))
+        {
+            InvokeAsync(method, context);
+        }
+        else
+        {
+            method.Invoke(context, null);
+        }
+    }
+
+    private static async void InvokeAsync(MethodInfo method, object context)
+    {
+        var condition = (Task)method.Invoke(context, null);
+        condition.ConfigureAwait(false);
+        condition.Wait();
+        await Task.FromResult(0);
     }
 }
