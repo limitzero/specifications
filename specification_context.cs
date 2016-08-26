@@ -449,6 +449,16 @@ public abstract class specification_context
         }
     }
 
+	public void release(object entity)
+	{
+		 if (entity == null) return;
+
+        if(entity is IDisposable)
+            ((IDisposable)entity).Dispose();
+
+        entity = null;
+	}
+	
     protected specification_context()
     {
         Trace.Listeners.Clear();
