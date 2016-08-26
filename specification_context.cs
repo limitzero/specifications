@@ -449,6 +449,9 @@ public abstract class specification_context
         }
     }
 
+	/// <summary>
+	/// This will dispose of the entity, if it implements IDisposable, and set the instance to null
+	/// </summary>
 	public void release(object entity)
 	{
 		 if (entity == null) return;
